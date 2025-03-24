@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: zbx-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    networks:
+      - zbxnet
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    container_name: zbx-server
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      - postgres
+    ports:
+      - "10051:10051"
+    networks:
+      - zbxnet
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    container_name: zbx-web
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.zabbix.rule=Host(`${DOMINIO}`)"
+      - "traefik.http.routers.zabbix.entrypoints=websecure"
+      - "traefik.http.routers.zabbix.tls=true"
+      - "traefik.http.routers.zabbix.tls.certresolver=le"
+      - "traefik.http.services.zabbix.loadbalancer.server.port=8080"
+    depends_on:
+      - zabbix-server
+    networks:
+      - webnet
+      - zbxnet
+
+  zabbix-agent2:
+    container_name: "zabbix-agent2"
+    image: zabbix/zabbix-agent2:7.0-alpine-latest
+    user: root
+    depends_on:
+      - zabbix-server
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /run/docker.sock:/var/run/docker.sock
+    environment:
+      ZBX_HOSTNAME: Zabbix
+      ZBX_SERVER_HOST: 127.0.0.1
+      ZBX_PASSIVE_ALLOW: "true"
+      ZBX_PASSIVESERVERS: zabbix-server
+      ZBX_ENABLEREMOTECOMMANDS: "1"
+      ZBX_ACTIVE_ALLOW: "false"
+      ZBX_DEBUGLEVEL: "3"
+    privileged: true
+    pid: "host"
+    ports:
+      - 10050:10050
+      - 31999:31999
+    networks:
+      - zbxnet
+
+networks:
+  zbxnet:
+    name: zbxnet
+    driver: bridge
+  webnet:
+    external: true
